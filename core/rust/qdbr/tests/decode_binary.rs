@@ -1,22 +1,11 @@
 mod common;
 
-use parquet::data_type::ByteArray;
-
 use common::{
     encode_decode_byte_array, encode_decode_byte_array_filtered, every_other_row_filter,
-    generate_nulls, optional_byte_array_schema, qdb_props, required_byte_array_schema, Encoding,
-    Null, ALL_NULLS, COUNT, VERSIONS,
+    generate_nulls, optional_byte_array_schema, qdb_props, required_byte_array_schema,
+    types::binary::generate_values, Encoding, Null, ALL_NULLS, COUNT, VERSIONS,
 };
 use qdb_core::col_type::ColumnTypeTag;
-
-fn generate_values(count: usize) -> Vec<ByteArray> {
-    (0..count)
-        .map(|i| {
-            let bytes: Vec<u8> = (0..10).map(|j| ((i * 7 + j) % 256) as u8).collect();
-            ByteArray::from(bytes)
-        })
-        .collect()
-}
 
 fn assert_binary(nulls: &[bool], data: &[u8]) {
     let row_count = nulls.len();
@@ -55,7 +44,10 @@ fn assert_binary_filtered(nulls: &[bool], data: &[u8], rows_filter: &[i64]) {
         let i = row as usize;
         if nulls[i] {
             let len = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-            assert_eq!(len, -1, "filtered row {fi} (orig {i}): null binary should have length -1");
+            assert_eq!(
+                len, -1,
+                "filtered row {fi} (orig {i}): null binary should have length -1"
+            );
             offset += 8;
         } else {
             let expected_bytes: Vec<u8> = (0..10).map(|j| ((i * 7 + j) % 256) as u8).collect();
@@ -106,7 +98,8 @@ fn run_binary_test(name: &str, encoding: Encoding) {
                 optional_byte_array_schema("col", None)
             };
             let props_f = qdb_props(ColumnTypeTag::Binary, *version, encoding);
-            let (data_f, _aux_f) = encode_decode_byte_array_filtered(&values, &nulls, schema_f, props_f, &rows_filter);
+            let (data_f, _aux_f) =
+                encode_decode_byte_array_filtered(&values, &nulls, schema_f, props_f, &rows_filter);
             assert_binary_filtered(&nulls, &data_f, &rows_filter);
         }
     }

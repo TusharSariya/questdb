@@ -1,40 +1,14 @@
 mod common;
 
 use parquet::basic::LogicalType;
-use parquet::data_type::ByteArray;
 
 use common::{
     encode_decode_byte_array, encode_decode_byte_array_filtered, every_other_row_filter,
-    generate_nulls, optional_byte_array_schema, qdb_props, required_byte_array_schema, Encoding,
-    Null, ALL_NULLS, COUNT, VERSIONS,
+    generate_nulls, optional_byte_array_schema, qdb_props, required_byte_array_schema,
+    types::strings::{expected_str_value, generate_values},
+    Encoding, Null, ALL_NULLS, COUNT, VERSIONS,
 };
 use qdb_core::col_type::ColumnTypeTag;
-
-fn generate_values(count: usize) -> Vec<ByteArray> {
-    (0..count)
-        .map(|i| {
-            if i % 11 == 0 {
-                // Multi-byte UTF-8: 2-byte chars in UTF-8, single code unit in UTF-16
-                ByteArray::from(format!("caf\u{00e9}_{i}").as_str())
-            } else if i % 13 == 0 {
-                // Characters outside BMP: requires surrogate pair in UTF-16
-                ByteArray::from(format!("emoji\u{1F600}_{i}").as_str())
-            } else {
-                ByteArray::from(format!("str_{i:04}").as_str())
-            }
-        })
-        .collect()
-}
-
-fn expected_str_value(i: usize) -> String {
-    if i % 11 == 0 {
-        format!("caf\u{00e9}_{i}")
-    } else if i % 13 == 0 {
-        format!("emoji\u{1F600}_{i}")
-    } else {
-        format!("str_{i:04}")
-    }
-}
 
 fn assert_string(nulls: &[bool], data: &[u8], aux: &[u8]) {
     let row_count = nulls.len();
@@ -86,17 +60,27 @@ fn assert_string(nulls: &[bool], data: &[u8], aux: &[u8]) {
 
 fn assert_string_filtered(nulls: &[bool], data: &[u8], aux: &[u8], rows_filter: &[i64]) {
     let filtered_count = rows_filter.len();
-    assert_eq!(aux.len(), (filtered_count + 1) * 8, "filtered string aux size mismatch");
+    assert_eq!(
+        aux.len(),
+        (filtered_count + 1) * 8,
+        "filtered string aux size mismatch"
+    );
 
     let initial_offset = u64::from_le_bytes(aux[0..8].try_into().unwrap());
-    assert_eq!(initial_offset, 0, "filtered string initial aux offset should be 0");
+    assert_eq!(
+        initial_offset, 0,
+        "filtered string initial aux offset should be 0"
+    );
 
     let mut data_offset = 0usize;
     for (fi, &row) in rows_filter.iter().enumerate() {
         let i = row as usize;
         if nulls[i] {
             let len = i32::from_le_bytes(data[data_offset..data_offset + 4].try_into().unwrap());
-            assert_eq!(len, -1, "filtered row {fi} (orig {i}): null string should have length -1");
+            assert_eq!(
+                len, -1,
+                "filtered row {fi} (orig {i}): null string should have length -1"
+            );
             data_offset += 4;
         } else {
             let expected_str = expected_str_value(i);
@@ -128,7 +112,11 @@ fn assert_string_filtered(nulls: &[bool], data: &[u8], aux: &[u8], rows_filter: 
             "filtered row {fi} (orig {i}): string aux offset mismatch"
         );
     }
-    assert_eq!(data_offset, data.len(), "filtered string data length mismatch");
+    assert_eq!(
+        data_offset,
+        data.len(),
+        "filtered string data length mismatch"
+    );
 }
 
 fn run_string_test(name: &str, encoding: Encoding) {
@@ -159,7 +147,8 @@ fn run_string_test(name: &str, encoding: Encoding) {
                 optional_byte_array_schema("col", Some(LogicalType::String))
             };
             let props_f = qdb_props(ColumnTypeTag::String, *version, encoding);
-            let (data_f, aux_f) = encode_decode_byte_array_filtered(&values, &nulls, schema_f, props_f, &rows_filter);
+            let (data_f, aux_f) =
+                encode_decode_byte_array_filtered(&values, &nulls, schema_f, props_f, &rows_filter);
             assert_string_filtered(&nulls, &data_f, &aux_f, &rows_filter);
         }
     }
@@ -175,5 +164,5 @@ fn test_string_delta_length_byte_array() {
     run_string_test("String", Encoding::DeltaLengthByteArray);
 }
 
-// Note: String type only supports Plain and DeltaLengthByteArray encodings.
-// RleDictionary and DeltaByteArray are not implemented for String decode.
+// Note: String type only supports Plain and DeltaLengthByteArray encodings in the reader.
+// RleDictionary writer support exists but QuestDB's reader does not yet decode it.
